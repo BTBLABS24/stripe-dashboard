@@ -365,6 +365,37 @@ def api_revenue_by_dow():
     return jsonify(labels=labels, total=total, new_hardware=new_hw, recurring=recurring)
 
 
+@app.route("/api/revenue-by-dow-half")
+def api_revenue_by_dow_half():
+    start_d, end_d = _parse_range(request.args, default_days=90)
+
+    rows = db.session.execute(
+        text(f"""
+            SELECT
+                EXTRACT(DOW FROM created AT TIME ZONE 'America/Chicago')::int AS dow,
+                CASE WHEN EXTRACT(DAY FROM created AT TIME ZONE 'America/Chicago') <= 15
+                     THEN 'first' ELSE 'second' END AS half,
+                SUM(amount) AS total
+            FROM charges
+            WHERE {_SUCCEEDED}
+              AND {_DATE_EXPR} BETWEEN :s AND :e
+            GROUP BY dow, half
+            ORDER BY dow
+        """),
+        {"s": start_d, "e": end_d},
+    )
+
+    data = defaultdict(lambda: {"first": 0, "second": 0})
+    for r in rows:
+        data[r.dow][r.half] = r.total / 100
+
+    day_names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    first = [round(data[i]["first"], 2) for i in range(7)]
+    second = [round(data[i]["second"], 2) for i in range(7)]
+
+    return jsonify(labels=day_names, first_half=first, second_half=second)
+
+
 @app.route("/api/revenue-by-hour")
 def api_revenue_by_hour():
     start_d, end_d = _parse_range(request.args, default_days=90)

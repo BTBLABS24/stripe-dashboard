@@ -156,6 +156,14 @@
     </div>
   </div>
 
+  <!-- DOW: 1st half vs 2nd half of month -->
+  <div class="chart-row full">
+    <div class="chart-panel">
+      <h2>Revenue by Day of Week — 1st Half vs 2nd Half of Month</h2>
+      <div class="chart-wrap"><canvas id="dowHalfChart"></canvas></div>
+    </div>
+  </div>
+
   <!-- Refund rate -->
   <div class="chart-row full">
     <div class="chart-panel">
@@ -311,6 +319,28 @@ async function loadHour() {
   });
 }
 
+async function loadDOWHalf() {
+  const d = await (await fetch('/api/revenue-by-dow-half?' + getParams())).json();
+  makeOrUpdate('dowHalf', $('dowHalfChart'), {
+    type: 'bar',
+    data: {
+      labels: d.labels,
+      datasets: [
+        {label:'1st Half (1st–15th)', data:d.first_half, backgroundColor:'#6366f1', borderRadius:4},
+        {label:'2nd Half (16th–EOM)', data:d.second_half, backgroundColor:'#a78bfa', borderRadius:4},
+      ]
+    },
+    options: {
+      responsive:true,
+      plugins:{tooltip:tooltipCurrency, legend:{position:'top', labels:{usePointStyle:true, pointStyle:'circle'}}},
+      scales:{
+        x:{grid:{display:false}},
+        y:{ticks:{callback:v=>fmt(v)}, grid:{color:'#f0f0f0'}},
+      }
+    }
+  });
+}
+
 async function loadRefundRate() {
   const d = await (await fetch('/api/refund-rate')).json();
   makeOrUpdate('refund', $('refundChart'), {
@@ -421,6 +451,7 @@ function loadAll() {
   loadSummary();
   loadDailyRevenue();
   loadDOW();
+  loadDOWHalf();
   loadHour();
   loadRefundRate();
 }
