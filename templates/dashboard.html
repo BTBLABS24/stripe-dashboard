@@ -365,23 +365,53 @@ function resetRange() {
   loadAll();
 }
 
+let syncPollTimer = null;
+
 async function triggerSync(full) {
   $('sync-spinner').style.display = 'inline';
-  $('sync-status').textContent = '';
+  $('sync-status').textContent = 'Starting…';
   try {
     const r = await fetch('/sync' + (full ? '?full=true' : ''), {method:'POST'});
     const d = await r.json();
-    if (d.status === 'ok') {
-      $('sync-status').textContent = `Synced ${d.charges_processed} charges.`;
-      loadAll();
+    if (d.status === 'started') {
+      pollSyncStatus();
+    } else if (d.status === 'already_running') {
+      pollSyncStatus();
     } else {
       $('sync-status').textContent = 'Error: ' + (d.message || 'unknown');
+      $('sync-spinner').style.display = 'none';
     }
   } catch(e) {
     $('sync-status').textContent = 'Network error.';
-  } finally {
     $('sync-spinner').style.display = 'none';
   }
+}
+
+function pollSyncStatus() {
+  if (syncPollTimer) clearInterval(syncPollTimer);
+  syncPollTimer = setInterval(async () => {
+    try {
+      const d = await (await fetch('/sync/status')).json();
+      if (d.running) {
+        $('sync-status').textContent = `Syncing… ${d.count} charges processed`;
+      } else {
+        clearInterval(syncPollTimer);
+        syncPollTimer = null;
+        $('sync-spinner').style.display = 'none';
+        if (d.error) {
+          $('sync-status').textContent = 'Error: ' + d.error;
+        } else {
+          $('sync-status').textContent = `Done — ${d.count} charges synced.`;
+          loadAll();
+        }
+      }
+    } catch(e) {
+      clearInterval(syncPollTimer);
+      syncPollTimer = null;
+      $('sync-spinner').style.display = 'none';
+      $('sync-status').textContent = 'Lost connection.';
+    }
+  }, 2000);
 }
 
 // -----------------------------------------------------------------------

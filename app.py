@@ -1,5 +1,6 @@
 import os
 import logging
+import threading
 from datetime import datetime, timedelta, date
 from collections import defaultdict
 
@@ -29,6 +30,10 @@ db = SQLAlchemy(app)
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 
 CHICAGO_TZ = pytz.timezone("America/Chicago")
+
+# Sync state (in-process, single worker)
+_sync_lock = threading.Lock()
+_sync_state = {"running": False, "count": 0, "error": None, "last_completed": None}
 
 # ---------------------------------------------------------------------------
 # Model
@@ -134,6 +139,7 @@ def sync_charges(full: bool = False) -> int:
             )
 
         count += 1
+        _sync_state["count"] = count
         if count % 500 == 0:
             db.session.commit()
             logger.info("Synced %d charges so far …", count)
@@ -141,6 +147,22 @@ def sync_charges(full: bool = False) -> int:
     db.session.commit()
     logger.info("Sync complete — %d charges processed.", count)
     return count
+
+
+def _run_sync_background(full: bool):
+    """Run sync in a background thread with state tracking."""
+    with app.app_context():
+        try:
+            _sync_state["running"] = True
+            _sync_state["count"] = 0
+            _sync_state["error"] = None
+            count = sync_charges(full=full)
+            _sync_state["last_completed"] = datetime.utcnow().isoformat() + "Z"
+        except Exception as e:
+            logger.exception("Background sync failed")
+            _sync_state["error"] = str(e)
+        finally:
+            _sync_state["running"] = False
 
 
 # ---------------------------------------------------------------------------
@@ -234,12 +256,21 @@ def dashboard():
 @app.route("/sync", methods=["GET", "POST"])
 def sync_endpoint():
     full = request.args.get("full", "false").lower() == "true"
+    if _sync_state["running"]:
+        return jsonify({"status": "already_running", "charges_so_far": _sync_state["count"]}), 409
+    if not _sync_lock.acquire(blocking=False):
+        return jsonify({"status": "already_running"}), 409
     try:
-        count = sync_charges(full=full)
-        return jsonify({"status": "ok", "charges_processed": count})
-    except Exception as e:
-        logger.exception("Sync failed")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        t = threading.Thread(target=_run_sync_background, args=(full,), daemon=True)
+        t.start()
+    finally:
+        _sync_lock.release()
+    return jsonify({"status": "started", "full": full})
+
+
+@app.route("/sync/status")
+def sync_status():
+    return jsonify(_sync_state)
 
 
 # ---------------------------------------------------------------------------
