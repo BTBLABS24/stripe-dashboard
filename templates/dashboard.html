@@ -159,7 +159,7 @@
   <!-- DOW: 1st half vs 2nd half of month -->
   <div class="chart-row full">
     <div class="chart-panel">
-      <h2>Revenue by Day of Week — 1st Half vs 2nd Half of Month</h2>
+      <h2>Revenue by Day of Week — AM vs PM (Chicago)</h2>
       <div class="chart-wrap"><canvas id="dowHalfChart"></canvas></div>
     </div>
   </div>
@@ -326,8 +326,8 @@ async function loadDOWHalf() {
     data: {
       labels: d.labels,
       datasets: [
-        {label:'1st Half (1st–15th)', data:d.first_half, backgroundColor:'#6366f1', borderRadius:4},
-        {label:'2nd Half (16th–EOM)', data:d.second_half, backgroundColor:'#a78bfa', borderRadius:4},
+        {label:'AM (12am–12pm)', data:d.first_half, backgroundColor:'#6366f1', borderRadius:4},
+        {label:'PM (12pm–12am)', data:d.second_half, backgroundColor:'#a78bfa', borderRadius:4},
       ]
     },
     options: {

@@ -373,7 +373,7 @@ def api_revenue_by_dow_half():
         text(f"""
             SELECT
                 EXTRACT(DOW FROM created AT TIME ZONE 'America/Chicago')::int AS dow,
-                CASE WHEN EXTRACT(DAY FROM created AT TIME ZONE 'America/Chicago') <= 15
+                CASE WHEN EXTRACT(HOUR FROM created AT TIME ZONE 'America/Chicago') < 12
                      THEN 'first' ELSE 'second' END AS half,
                 SUM(amount) AS total
             FROM charges
