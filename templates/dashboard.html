@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stripe Revenue Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f8f9fb; --surface: #ffffff; --border: #e2e5ea;
+    --text: #1a1d23; --muted: #6b7280; --accent: #3b82f6;
+    --green: #10b981; --orange: #f59e0b; --red: #ef4444;
+    --blue-light: rgba(59,130,246,.12); --green-light: rgba(16,185,129,.12);
+    --orange-light: rgba(245,158,11,.12);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         background: var(--bg); color: var(--text); line-height: 1.5; }
+
+  /* Layout */
+  .container { max-width: 1320px; margin: 0 auto; padding: 24px 20px; }
+  header { display: flex; justify-content: space-between; align-items: center;
+           flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+  header h1 { font-size: 22px; font-weight: 700; }
+
+  /* Controls row */
+  .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .controls input[type="date"] {
+    padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 13px; background: var(--surface); color: var(--text);
+  }
+  .btn {
+    padding: 7px 14px; border: none; border-radius: 6px; font-size: 13px;
+    font-weight: 600; cursor: pointer; transition: opacity .15s;
+  }
+  .btn:hover { opacity: .85; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-secondary { background: var(--border); color: var(--text); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+  /* Summary cards */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+           gap: 16px; margin-bottom: 24px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .card-label { font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
+                color: var(--muted); font-weight: 600; margin-bottom: 6px; }
+  .card-value { font-size: 26px; font-weight: 700; }
+  .card-split { display: flex; gap: 14px; margin-top: 8px; font-size: 12px; }
+  .split-item { display: flex; align-items: center; gap: 4px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .dot-new { background: var(--orange); }
+  .dot-rec { background: var(--green); }
+
+  /* Chart panels */
+  .chart-row { display: grid; gap: 16px; margin-bottom: 16px; }
+  .chart-row.full { grid-template-columns: 1fr; }
+  .chart-row.half { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 800px) { .chart-row.half { grid-template-columns: 1fr; } }
+  .chart-panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .chart-panel h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+  .chart-wrap { position: relative; width: 100%; }
+
+  /* Sync banner */
+  .sync-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 20px;
+              padding: 10px 14px; background: var(--blue-light); border-radius: 8px;
+              font-size: 13px; }
+  .sync-bar .status { color: var(--muted); }
+  #sync-spinner { display: none; }
+
+  /* Loading overlay */
+  .loading { text-align: center; padding: 60px 0; color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <header>
+    <h1>Stripe Revenue Dashboard</h1>
+    <div class="controls">
+      <input type="date" id="start-date" title="Start date">
+      <span style="color:var(--muted);">to</span>
+      <input type="date" id="end-date" title="End date">
+      <button class="btn btn-primary btn-sm" onclick="applyRange()">Apply</button>
+      <button class="btn btn-secondary btn-sm" onclick="resetRange()">Reset</button>
+    </div>
+  </header>
+
+  <!-- Sync bar -->
+  <div class="sync-bar">
+    <button class="btn btn-primary btn-sm" onclick="triggerSync(false)">Sync Recent</button>
+    <button class="btn btn-secondary btn-sm" onclick="triggerSync(true)">Full Backfill</button>
+    <span id="sync-spinner">Syncing …</span>
+    <span class="status" id="sync-status"></span>
+  </div>
+
+  <!-- Summary cards -->
+  <div class="cards" id="summary-cards">
+    <div class="card" id="card-today">
+      <div class="card-label">Today</div>
+      <div class="card-value" id="val-today">--</div>
+      <div class="card-split">
+        <span class="split-item"><span class="dot dot-new"></span> <span id="val-today-new">--</span></span>
+        <span class="split-item"><span class="dot dot-rec"></span> <span id="val-today-rec">--</span></span>
+      </div>
+    </div>
+    <div class="card" id="card-yesterday">
+      <div class="card-label">Yesterday</div>
+      <div class="card-value" id="val-yesterday">--</div>
+      <div class="card-split">
+        <span class="split-item"><span class="dot dot-new"></span> <span id="val-yest-new">--</span></span>
+        <span class="split-item"><span class="dot dot-rec"></span> <span id="val-yest-rec">--</span></span>
+      </div>
+    </div>
+    <div class="card" id="card-mtd">
+      <div class="card-label">Month to Date</div>
+      <div class="card-value" id="val-mtd">--</div>
+      <div class="card-split">
+        <span class="split-item"><span class="dot dot-new"></span> <span id="val-mtd-new">--</span></span>
+        <span class="split-item"><span class="dot dot-rec"></span> <span id="val-mtd-rec">--</span></span>
+      </div>
+    </div>
+    <div class="card" id="card-period" style="display:none;">
+      <div class="card-label">Selected Period</div>
+      <div class="card-value" id="val-period">--</div>
+      <div class="card-split">
+        <span class="split-item"><span class="dot dot-new"></span> <span id="val-period-new">--</span></span>
+        <span class="split-item"><span class="dot dot-rec"></span> <span id="val-period-rec">--</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Daily Revenue -->
+  <div class="chart-row full">
+    <div class="chart-panel">
+      <h2>Daily Gross Revenue</h2>
+      <div class="chart-wrap"><canvas id="dailyChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- DOW + Hour -->
+  <div class="chart-row half">
+    <div class="chart-panel">
+      <h2>Revenue by Day of Week</h2>
+      <div class="chart-wrap"><canvas id="dowChart"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <h2>Revenue by Hour of Day (Chicago)</h2>
+      <div class="chart-wrap"><canvas id="hourChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Refund rate -->
+  <div class="chart-row full">
+    <div class="chart-panel">
+      <h2>Refund Rate by Month</h2>
+      <div class="chart-wrap"><canvas id="refundChart"></canvas></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// -----------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+const fmt = v => v.toLocaleString('en-US', {style:'currency', currency:'USD'});
+
+function dateStr(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+function defaultStart() {
+  const d = new Date(); d.setDate(d.getDate() - 90); return dateStr(d);
+}
+function defaultEnd() { return dateStr(new Date()); }
+
+// -----------------------------------------------------------------------
+// State
+// -----------------------------------------------------------------------
+let charts = {};
+let customRange = false;
+
+function getParams() {
+  const s = $('start-date').value;
+  const e = $('end-date').value;
+  if (s && e) return `start=${s}&end=${e}`;
+  return `start=${defaultStart()}&end=${defaultEnd()}`;
+}
+
+// -----------------------------------------------------------------------
+// Chart factory helpers
+// -----------------------------------------------------------------------
+const COLORS = {
+  total: {border:'#3b82f6', bg:'rgba(59,130,246,.15)'},
+  new:   {border:'#f59e0b', bg:'rgba(245,158,11,.15)'},
+  rec:   {border:'#10b981', bg:'rgba(16,185,129,.15)'},
+  refund:{border:'#ef4444', bg:'rgba(239,68,68,.25)'},
+};
+
+function makeOrUpdate(key, ctx, cfg) {
+  if (charts[key]) { charts[key].destroy(); }
+  charts[key] = new Chart(ctx, cfg);
+}
+
+const tooltipCurrency = {
+  callbacks: {
+    label: ctx => `${ctx.dataset.label}: ${fmt(ctx.parsed.y)}`
+  }
+};
+
+// -----------------------------------------------------------------------
+// Data loaders
+// -----------------------------------------------------------------------
+async function loadSummary() {
+  const params = customRange ? getParams() : '';
+  const url = '/api/summary' + (params ? '?' + params : '');
+  const d = await (await fetch(url)).json();
+
+  function fill(prefix, obj) {
+    $(prefix).textContent = fmt(obj.total);
+    $(prefix + '-new').textContent = fmt(obj.new_hardware);
+    $(prefix + '-rec').textContent = fmt(obj.recurring);
+  }
+  fill('val-today', d.today);
+  fill('val-yest', d.yesterday);
+  fill('val-mtd', d.mtd);
+
+  if (d.period) {
+    $('card-period').style.display = '';
+    fill('val-period', d.period);
+  } else {
+    $('card-period').style.display = 'none';
+  }
+}
+
+async function loadDailyRevenue() {
+  const d = await (await fetch('/api/daily-revenue?' + getParams())).json();
+  makeOrUpdate('daily', $('dailyChart'), {
+    type: 'line',
+    data: {
+      labels: d.labels,
+      datasets: [
+        {label:'Total', data:d.total, borderColor:COLORS.total.border,
+         backgroundColor:COLORS.total.bg, fill:true, tension:.3, borderWidth:2, pointRadius:0},
+        {label:'New / Hardware', data:d.new_hardware, borderColor:COLORS.new.border,
+         backgroundColor:COLORS.new.bg, fill:true, tension:.3, borderWidth:1.5, pointRadius:0},
+        {label:'Recurring', data:d.recurring, borderColor:COLORS.rec.border,
+         backgroundColor:COLORS.rec.bg, fill:true, tension:.3, borderWidth:1.5, pointRadius:0},
+      ]
+    },
+    options: {
+      responsive:true, interaction:{mode:'index', intersect:false},
+      plugins:{tooltip:tooltipCurrency, legend:{position:'top', labels:{usePointStyle:true, pointStyle:'circle'}}},
+      scales:{
+        x:{ticks:{maxTicksLimit:15, font:{size:11}}, grid:{display:false}},
+        y:{ticks:{callback:v=>fmt(v), font:{size:11}}, grid:{color:'#f0f0f0'}},
+      }
+    }
+  });
+}
+
+async function loadDOW() {
+  const d = await (await fetch('/api/revenue-by-dow?' + getParams())).json();
+  makeOrUpdate('dow', $('dowChart'), {
+    type: 'bar',
+    data: {
+      labels: d.labels,
+      datasets: [
+        {label:'New / Hardware', data:d.new_hardware, backgroundColor:COLORS.new.border, borderRadius:4},
+        {label:'Recurring', data:d.recurring, backgroundColor:COLORS.rec.border, borderRadius:4},
+      ]
+    },
+    options: {
+      responsive:true,
+      plugins:{tooltip:tooltipCurrency, legend:{position:'top', labels:{usePointStyle:true, pointStyle:'circle'}}},
+      scales:{
+        x:{stacked:true, grid:{display:false}},
+        y:{stacked:true, ticks:{callback:v=>fmt(v)}, grid:{color:'#f0f0f0'}},
+      }
+    }
+  });
+}
+
+async function loadHour() {
+  const d = await (await fetch('/api/revenue-by-hour?' + getParams())).json();
+  makeOrUpdate('hour', $('hourChart'), {
+    type: 'bar',
+    data: {
+      labels: d.labels,
+      datasets: [
+        {label:'New / Hardware', data:d.new_hardware, backgroundColor:COLORS.new.border, borderRadius:3},
+        {label:'Recurring', data:d.recurring, backgroundColor:COLORS.rec.border, borderRadius:3},
+      ]
+    },
+    options: {
+      responsive:true,
+      plugins:{tooltip:tooltipCurrency, legend:{position:'top', labels:{usePointStyle:true, pointStyle:'circle'}}},
+      scales:{
+        x:{stacked:true, grid:{display:false}, ticks:{font:{size:10}}},
+        y:{stacked:true, ticks:{callback:v=>fmt(v)}, grid:{color:'#f0f0f0'}},
+      }
+    }
+  });
+}
+
+async function loadRefundRate() {
+  const d = await (await fetch('/api/refund-rate')).json();
+  makeOrUpdate('refund', $('refundChart'), {
+    type: 'bar',
+    data: {
+      labels: d.labels,
+      datasets: [{
+        label: 'Refund Rate %',
+        data: d.rates,
+        backgroundColor: COLORS.refund.bg,
+        borderColor: COLORS.refund.border,
+        borderWidth: 1.5,
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      responsive:true,
+      plugins:{
+        tooltip:{
+          callbacks:{
+            label: ctx => {
+              const i = ctx.dataIndex;
+              return [
+                `Refund rate: ${d.rates[i]}%`,
+                `Refunded: ${d.refundeds[i]} / ${d.totals[i]} orders`
+              ];
+            }
+          }
+        },
+        legend:{display:false},
+      },
+      scales:{
+        x:{grid:{display:false}},
+        y:{ticks:{callback:v=>v+'%'}, grid:{color:'#f0f0f0'}, beginAtZero:true},
+      }
+    }
+  });
+}
+
+// -----------------------------------------------------------------------
+// Controls
+// -----------------------------------------------------------------------
+function applyRange() {
+  customRange = true;
+  loadAll();
+}
+
+function resetRange() {
+  customRange = false;
+  $('start-date').value = defaultStart();
+  $('end-date').value = defaultEnd();
+  loadAll();
+}
+
+async function triggerSync(full) {
+  $('sync-spinner').style.display = 'inline';
+  $('sync-status').textContent = '';
+  try {
+    const r = await fetch('/sync' + (full ? '?full=true' : ''), {method:'POST'});
+    const d = await r.json();
+    if (d.status === 'ok') {
+      $('sync-status').textContent = `Synced ${d.charges_processed} charges.`;
+      loadAll();
+    } else {
+      $('sync-status').textContent = 'Error: ' + (d.message || 'unknown');
+    }
+  } catch(e) {
+    $('sync-status').textContent = 'Network error.';
+  } finally {
+    $('sync-spinner').style.display = 'none';
+  }
+}
+
+// -----------------------------------------------------------------------
+// Init
+// -----------------------------------------------------------------------
+function loadAll() {
+  loadSummary();
+  loadDailyRevenue();
+  loadDOW();
+  loadHour();
+  loadRefundRate();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  $('start-date').value = defaultStart();
+  $('end-date').value = defaultEnd();
+  loadAll();
+});
+</script>
+</body>
+</html>
